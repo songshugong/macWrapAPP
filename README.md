@@ -21,20 +21,10 @@ cd /Users/songzihan/Documents/mac换行APP
 swift build -c release
 ```
 
-## 生成带图标 APP
-默认会自动读取 `~/Downloads` 里最新的一张图片作为图标源，输出到 `dist/FinderWrapNavigator.app`。
-
-```bash
-cd /Users/songzihan/Documents/mac换行APP
-bash scripts/build_app.sh
-```
-
-如果想手动指定图标源（推荐 1024x1024 PNG）：
-
-```bash
-cd /Users/songzihan/Documents/mac换行APP
-bash scripts/build_app.sh /absolute/path/to/icon.png
-```
+## 预构建 APP（可直接使用）
+- 包路径：`release/FinderWrapNavigator.app.zip`
+- 解压后得到：`FinderWrapNavigator.app`
+- 双击即可运行（首次可能需要在系统设置中授权权限）
 
 ## 运行
 ```bash
