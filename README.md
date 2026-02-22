@@ -21,8 +21,7 @@ swift build -c release
 ```
 
 ## 预构建 APP（可直接使用）
-- 包路径：`release/FinderWrapNavigator.app.zip`
-- 解压后得到：`FinderWrapNavigator.app`
+- 包路径：`FinderWrapNavigator.app`（仓库根目录）
 - 双击即可运行（首次可能需要在系统设置中授权权限）
 
 ## 云端自动打包（GitHub Actions）
