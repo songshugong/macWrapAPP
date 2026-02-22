@@ -21,8 +21,12 @@ swift build -c release
 ```
 
 ## 预构建 APP（可直接使用）
-- 包路径：`FinderWrapNavigator.app`（仓库根目录）
-- 双击即可运行（首次可能需要在系统设置中授权权限）
+- 文件路径：`FinderWrapNavigator`（仓库根目录）
+- 在终端运行：
+```bash
+cd /Users/songzihan/Documents/mac换行APP
+./FinderWrapNavigator
+```
 
 ## 云端自动打包（GitHub Actions）
 - Workflow 文件：`.github/workflows/build-macos-app.yml`
