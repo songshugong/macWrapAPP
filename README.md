@@ -25,6 +25,16 @@ swift build -c release
 - 解压后得到：`FinderWrapNavigator.app`
 - 双击即可运行（首次可能需要在系统设置中授权权限）
 
+## 云端自动打包（GitHub Actions）
+- Workflow 文件：`.github/workflows/build-macos-app.yml`
+- 触发方式：
+  - 手动触发：GitHub 仓库 -> `Actions` -> `Build macOS App` -> `Run workflow`
+  - 自动触发：push 到 `main`（源码/图标/workflow 变更）
+- 产物位置：
+  - 在每次 Action 的 `Artifacts` 下载 `FinderWrapNavigator-macOS`
+  - 解压后得到 `FinderWrapNavigator.app.zip`
+- 打 `v*` 标签（如 `v1.0.0`）时，会把安装包同时挂到 GitHub Release。
+
 ## 运行
 ```bash
 cd /Users/songzihan/Documents/mac换行APP

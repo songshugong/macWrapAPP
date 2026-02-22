@@ -1,0 +1,97 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "Package.swift"
+      - "FinderWrapNavigatorSources/**"
+      - "assets/**"
+      - ".github/workflows/build-macos-app.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Swift Version
+        run: swift --version
+
+      - name: Build Release Binary
+        run: swift build -c release
+
+      - name: Package .app
+        run: |
+          set -euo pipefail
+          APP_NAME="FinderWrapNavigator"
+          DIST_DIR="dist-ci"
+          APP_DIR="${DIST_DIR}/${APP_NAME}.app"
+          CONTENTS_DIR="${APP_DIR}/Contents"
+          mkdir -p "${CONTENTS_DIR}/MacOS" "${CONTENTS_DIR}/Resources"
+
+          cp ".build/release/${APP_NAME}" "${CONTENTS_DIR}/MacOS/${APP_NAME}"
+          chmod +x "${CONTENTS_DIR}/MacOS/${APP_NAME}"
+
+          if [[ -f "assets/AppIcon.icns" ]]; then
+            cp "assets/AppIcon.icns" "${CONTENTS_DIR}/Resources/AppIcon.icns"
+          fi
+
+          cat > "${CONTENTS_DIR}/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleDisplayName</key>
+            <string>FinderWrap</string>
+            <key>CFBundleExecutable</key>
+            <string>FinderWrapNavigator</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.finderwrap.navigator</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>FinderWrapNavigator</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Zip .app
+        run: |
+          set -euo pipefail
+          cd dist-ci
+          ditto -c -k --sequesterRsrc --keepParent FinderWrapNavigator.app FinderWrapNavigator.app.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinderWrapNavigator-macOS
+          path: dist-ci/FinderWrapNavigator.app.zip
+          if-no-files-found: error
+
+      - name: Publish Release Asset (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-ci/FinderWrapNavigator.app.zip
