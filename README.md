@@ -1,6 +1,6 @@
 # macWrapAPP
 
-[直接下载 FinderWrapNavigator](https://github.com/songshugong/macWrapAPP/raw/main/FinderWrapNavigator)
+[直接下载 FinderWrapNavigator.app.zip](https://github.com/songshugong/macWrapAPP/raw/main/release/FinderWrapNavigator.app.zip)
 
 Finder 图标模式方向键增强工具（macOS 菜单栏应用）。
 
@@ -23,12 +23,8 @@ swift build -c release
 ```
 
 ## 预构建 APP（可直接使用）
-- 文件路径：`FinderWrapNavigator`（仓库根目录）
-- 在终端运行：
-```bash
-cd /Users/songzihan/Documents/mac换行APP
-./FinderWrapNavigator
-```
+- 文件路径：`release/FinderWrapNavigator.app.zip`
+- 解压后得到 `FinderWrapNavigator.app`，双击运行
 
 ## 云端自动打包（GitHub Actions）
 - Workflow 文件：`.github/workflows/build-macos-app.yml`
