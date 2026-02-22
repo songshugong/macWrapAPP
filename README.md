@@ -1,5 +1,7 @@
 # macWrapAPP
 
+[直接下载 FinderWrapNavigator](https://github.com/songshugong/macWrapAPP/raw/main/FinderWrapNavigator)
+
 Finder 图标模式方向键增强工具（macOS 菜单栏应用）。
 
 ## 功能
