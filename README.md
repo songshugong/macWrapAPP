@@ -30,11 +30,13 @@ xattr -dr com.apple.quarantine /path/to/FinderWrapNavigator.app
 然后再次双击打开。
 
 ## 首次权限
-首次运行通常会请求：
+首次运行必需：
 - 辅助功能（Accessibility）
+
+可选（部分环境可能会提示）：
 - 输入监控（Input Monitoring）
 
-授权后重启一次 App，功能会更稳定。
+说明：当前版本核心功能依赖辅助功能；输入监控不是硬性前置条件。
 
 ## 使用说明
 - 启用主功能：开启 Finder 方向键换行增强。
@@ -44,4 +46,4 @@ xattr -dr com.apple.quarantine /path/to/FinderWrapNavigator.app
 
 ## 待办事项
 - [ ] 优化“隐藏 Dock 图标”开关：开启时自动同步清理 Dock 的 `recent-apps` 条目并刷新 Dock，避免残留图标。
-- [ ] 在主界面显示权限状态：明确标识辅助功能、输入监控是否已授权到位。
+- [ ] 在主界面显示权限状态：明确标识“辅助功能（必需）/输入监控（可选）”是否到位。
