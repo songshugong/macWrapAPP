@@ -217,7 +217,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             startServiceIfPossible()
         }
 
-        showControlPanelWithStartupFailsafe()
+        let launchedFromLoginAgent = isLikelyLaunchAtLoginStartup()
+        let permissionStatus = currentPermissionStatus()
+        let shouldShowStartupPanel = !launchedFromLoginAgent || !permissionStatus.accessibilityAuthorized
+        if shouldShowStartupPanel {
+            showControlPanelWithStartupFailsafe()
+        }
         updateToggleTitle()
     }
 
@@ -635,6 +640,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showControlPanel(forceActivate: true)
             }
         }
+    }
+
+    private func isLikelyLaunchAtLoginStartup() -> Bool {
+        guard launchAtLoginManager.isEnabled else { return false }
+        return !CommandLine.arguments.contains(where: { $0.hasPrefix("-psn_") })
     }
 
     private func t(_ key: LKey) -> String {
