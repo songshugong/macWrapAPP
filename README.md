@@ -41,3 +41,6 @@ xattr -dr com.apple.quarantine /path/to/FinderWrapNavigator.app
 - 长按加速模式：长按 `←/→` 时切换更快。
 - 开机启动：开机自动运行。
 - 支持中英文切换。
+
+## 待办事项
+- [ ] 优化“隐藏 Dock 图标”开关：开启时自动同步清理 Dock 的 `recent-apps` 条目并刷新 Dock，避免残留图标。
