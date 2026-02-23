@@ -177,6 +177,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard singleInstanceGuard.acquire() else {
+            Self.activateRunningInstance()
+            Self.cleanDockRecentEntryForCurrentBundle()
             postShowPanelRequestToRunningInstance()
             NSApplication.shared.terminate(nil)
             return
@@ -201,6 +203,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         showControlPanelWithStartupFailsafe()
         updateToggleTitle()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if hideDockIcon {
+            syncDockRecentAppEntryIfNeeded()
+        }
+        showControlPanel(forceActivate: true)
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -385,6 +395,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             userInfo: nil,
             deliverImmediately: true
+        )
+    }
+
+    private static func activateRunningInstance() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.finderwrap.navigator"
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+            if app.processIdentifier != currentPID {
+                _ = app.activate(options: [.activateIgnoringOtherApps])
+            }
+        }
+    }
+
+    private static func cleanDockRecentEntryForCurrentBundle() {
+        guard let appURL = Bundle.main.bundleURL as URL? else { return }
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.finderwrap.navigator"
+        DockRecentAppsManager().removeRecentEntry(
+            bundleIdentifier: bundleID,
+            appURL: appURL
         )
     }
 
