@@ -44,3 +44,4 @@ xattr -dr com.apple.quarantine /path/to/FinderWrapNavigator.app
 
 ## 待办事项
 - [ ] 优化“隐藏 Dock 图标”开关：开启时自动同步清理 Dock 的 `recent-apps` 条目并刷新 Dock，避免残留图标。
+- [ ] 在主界面显示权限状态：明确标识辅助功能、输入监控是否已授权到位。
