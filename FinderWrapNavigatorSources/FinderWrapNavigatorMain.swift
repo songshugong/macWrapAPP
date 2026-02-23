@@ -171,6 +171,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appDidBecomeActiveObserver: NSObjectProtocol?
     private var dockCleanupWorkItems: [DispatchWorkItem] = []
     private var accessibilityAuthorizedAtLaunch = true
+    private var lastAccessibilityAuthorized: Bool?
     private var shouldOfferRestartAfterPermissionGrant = false
     private var currentLanguage: AppLanguage = .zhHans
     private var controlPanelController: ControlPanelWindowController?
@@ -197,6 +198,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         registerExternalOpenObserver()
         registerAppActivationObserver()
         accessibilityAuthorizedAtLaunch = AXIsProcessTrusted()
+        lastAccessibilityAuthorized = accessibilityAuthorizedAtLaunch
 
         let startupState = preferences.loadOrInitializeDefaults()
         currentLanguage = startupState.language
@@ -610,7 +612,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showControlPanel(forceActivate: Bool) {
         guard let controlPanelController else { return }
-        controlPanelController.positionWindowToRightSide()
+        let permissionStatus = currentPermissionStatus()
+        if !permissionStatus.accessibilityAuthorized {
+            controlPanelController.positionWindowToRightSide()
+        }
+        controlPanelController.setFloatingMode(!permissionStatus.accessibilityAuthorized)
         controlPanelController.showWindow(nil)
         if forceActivate {
             NSApp.activate(ignoringOtherApps: true)
@@ -633,6 +639,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateToggleTitle() {
         let permissions = currentPermissionStatus()
+        let wasAccessibilityAuthorized = lastAccessibilityAuthorized
 
         if !accessibilityAuthorizedAtLaunch
             && permissions.accessibilityAuthorized
@@ -642,6 +649,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if service.isRunning {
             shouldOfferRestartAfterPermissionGrant = false
         }
+
+        controlPanelController?.setFloatingMode(!permissions.accessibilityAuthorized)
+        if wasAccessibilityAuthorized == false && permissions.accessibilityAuthorized {
+            controlPanelController?.positionWindowToCenter()
+            showControlPanel(forceActivate: true)
+        }
+        lastAccessibilityAuthorized = permissions.accessibilityAuthorized
 
         openPanelItem?.title = t(.menuOpenPanel)
         toggleItem?.title = service.isRunning ? t(.menuDisable) : t(.menuEnable)
@@ -840,6 +854,30 @@ private final class ControlPanelWindowController: NSWindowController {
             min(frame.origin.y, visibleFrame.maxY - frame.height - 12)
         )
         window.setFrame(frame, display: false)
+    }
+
+    func positionWindowToCenter() {
+        guard let window else { return }
+
+        let currentScreen = window.screen ?? NSScreen.main
+        guard let visibleFrame = currentScreen?.visibleFrame else {
+            window.center()
+            return
+        }
+
+        var frame = window.frame
+        frame.origin.x = visibleFrame.midX - frame.width / 2
+        frame.origin.y = visibleFrame.midY - frame.height / 2
+        frame.origin.x = max(visibleFrame.minX + 12, frame.origin.x)
+        frame.origin.y = max(
+            visibleFrame.minY + 12,
+            min(frame.origin.y, visibleFrame.maxY - frame.height - 12)
+        )
+        window.setFrame(frame, display: false)
+    }
+
+    func setFloatingMode(_ enabled: Bool) {
+        window?.level = enabled ? .floating : .normal
     }
 
     func updatePermissionStatus(
