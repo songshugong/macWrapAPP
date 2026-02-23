@@ -148,6 +148,8 @@ enum FinderWrapNavigatorMain {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let showPanelRequestNotification = Notification.Name("com.finderwrap.navigator.showPanelRequest")
+
     private struct PermissionStatus {
         let accessibilityAuthorized: Bool
         let inputMonitoringAuthorized: Bool?
@@ -159,6 +161,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let singleInstanceGuard = SingleInstanceGuard()
     private let launchAtLoginQueue = DispatchQueue(label: "com.finderwrap.navigator.launchAtLogin")
     private let preferences = AppPreferences()
+    private var externalOpenObserver: NSObjectProtocol?
     private var currentLanguage: AppLanguage = .zhHans
     private var controlPanelController: ControlPanelWindowController?
     private var hideMenuBarIcon = false
@@ -174,9 +177,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard singleInstanceGuard.acquire() else {
+            postShowPanelRequestToRunningInstance()
             NSApplication.shared.terminate(nil)
             return
         }
+
+        registerExternalOpenObserver()
 
         let startupState = preferences.loadOrInitializeDefaults()
         currentLanguage = startupState.language
@@ -198,6 +204,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let externalOpenObserver {
+            DistributedNotificationCenter.default().removeObserver(externalOpenObserver)
+            self.externalOpenObserver = nil
+        }
         singleInstanceGuard.release()
     }
 
@@ -352,6 +362,29 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         dockRecentAppsManager.removeRecentEntry(
             bundleIdentifier: bundleID,
             appURL: appURL
+        )
+    }
+
+    private func registerExternalOpenObserver() {
+        externalOpenObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Self.showPanelRequestNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if self.hideDockIcon {
+                self.syncDockRecentAppEntryIfNeeded()
+            }
+            self.showControlPanel(forceActivate: true)
+        }
+    }
+
+    private func postShowPanelRequestToRunningInstance() {
+        DistributedNotificationCenter.default().postNotificationName(
+            Self.showPanelRequestNotification,
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
         )
     }
 
