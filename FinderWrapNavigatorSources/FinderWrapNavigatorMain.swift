@@ -293,7 +293,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             try service.start()
             updateToggleTitle()
         } catch FinderRightArrowWrapService.StartError.notTrusted {
-            showPermissionAlert()
             updateToggleTitle()
         } catch {
             showGenericError(error)
