@@ -209,6 +209,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if hideDockIcon {
             scheduleDockRecentCleanupBurst()
+            runDockSuppressionRefreshCycle()
         }
         showControlPanel(forceActivate: true)
         return true
@@ -394,6 +395,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Mimic the manual off->on hide-dock toggle that users found effective.
+    // We only run this on reopen paths to suppress stale Dock entries.
+    private func runDockSuppressionRefreshCycle() {
+        guard hideDockIcon else { return }
+
+        _ = NSApp.setActivationPolicy(.regular)
+        let restoreWorkItem = DispatchWorkItem { [weak self] in
+            guard let self, self.hideDockIcon else { return }
+            self.applyInterfaceVisibility()
+            self.scheduleDockRecentCleanupBurst()
+        }
+        dockCleanupWorkItems.append(restoreWorkItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: restoreWorkItem)
+    }
+
     private func cancelDockCleanupWorkItems() {
         dockCleanupWorkItems.forEach { $0.cancel() }
         dockCleanupWorkItems.removeAll()
@@ -408,6 +424,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             if self.hideDockIcon {
                 self.scheduleDockRecentCleanupBurst()
+                self.runDockSuppressionRefreshCycle()
             }
             self.showControlPanel(forceActivate: true)
         }
