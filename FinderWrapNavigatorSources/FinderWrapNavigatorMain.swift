@@ -169,6 +169,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = AppPreferences()
     private var externalOpenObserver: NSObjectProtocol?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
+    private var permissionPollTimer: Timer?
     private var dockCleanupWorkItems: [DispatchWorkItem] = []
     private var accessibilityAuthorizedAtLaunch = true
     private var lastAccessibilityAuthorized: Bool?
@@ -199,6 +200,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         registerAppActivationObserver()
         accessibilityAuthorizedAtLaunch = AXIsProcessTrusted()
         lastAccessibilityAuthorized = accessibilityAuthorizedAtLaunch
+        ensurePermissionPollingIfNeeded()
 
         let startupState = preferences.loadOrInitializeDefaults()
         currentLanguage = startupState.language
@@ -230,6 +232,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         cancelDockCleanupWorkItems()
+        stopPermissionPolling()
         if let externalOpenObserver {
             DistributedNotificationCenter.default().removeObserver(externalOpenObserver)
             self.externalOpenObserver = nil
@@ -273,6 +276,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func openAccessibilitySettings() {
+        ensurePermissionPollingIfNeeded()
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         ) else { return }
@@ -641,6 +645,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let permissions = currentPermissionStatus()
         let wasAccessibilityAuthorized = lastAccessibilityAuthorized
 
+        if permissions.accessibilityAuthorized {
+            stopPermissionPolling()
+        } else {
+            ensurePermissionPollingIfNeeded()
+        }
+
         if !accessibilityAuthorizedAtLaunch
             && permissions.accessibilityAuthorized
             && !service.isRunning {
@@ -688,6 +698,32 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         controlPanelController?.updateLanguage(currentLanguage)
         controlPanelController?.updateIcon(statusIcon(isEnabled: service.isRunning))
+    }
+
+    @objc
+    private func pollPermissionStatus() {
+        updateToggleTitle()
+    }
+
+    private func ensurePermissionPollingIfNeeded() {
+        guard !AXIsProcessTrusted() else {
+            stopPermissionPolling()
+            return
+        }
+        guard permissionPollTimer == nil else { return }
+        permissionPollTimer = Timer.scheduledTimer(
+            timeInterval: 0.6,
+            target: self,
+            selector: #selector(pollPermissionStatus),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(permissionPollTimer!, forMode: .common)
+    }
+
+    private func stopPermissionPolling() {
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = nil
     }
 
     private func currentPermissionStatus() -> PermissionStatus {
