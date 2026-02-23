@@ -39,6 +39,7 @@ private enum LKey {
     case panelHideDesktopIcon
     case panelPrintStats
     case panelRestartApp
+    case panelRestartHint
     case panelQuit
     case panelDeveloperPrefix
     case panelLanguage
@@ -84,6 +85,7 @@ private enum L10n {
         case (.zhHans, .panelHideDesktopIcon): return "隐藏桌面图标"
         case (.zhHans, .panelPrintStats): return "打印统计"
         case (.zhHans, .panelRestartApp): return "重新启动应用"
+        case (.zhHans, .panelRestartHint): return "首次授权后需要重启应用"
         case (.zhHans, .panelQuit): return "退出"
         case (.zhHans, .panelDeveloperPrefix): return "开发者"
         case (.zhHans, .panelLanguage): return "语言"
@@ -125,6 +127,7 @@ private enum L10n {
         case (.en, .panelHideDesktopIcon): return "Hide Dock Icon"
         case (.en, .panelPrintStats): return "Print Stats"
         case (.en, .panelRestartApp): return "Restart App"
+        case (.en, .panelRestartHint): return "After first permission grant, restart the app"
         case (.en, .panelQuit): return "Quit"
         case (.en, .panelDeveloperPrefix): return "Developer"
         case (.en, .panelLanguage): return "Language"
@@ -719,23 +722,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restartApp() {
-        let openConfig = NSWorkspace.OpenConfiguration()
-        openConfig.activates = true
-        openConfig.addsToRecentItems = false
-
         guard let bundleURL = Bundle.main.bundleURL as URL? else {
             NSApplication.shared.terminate(nil)
             return
         }
 
-        NSWorkspace.shared.openApplication(at: bundleURL, configuration: openConfig) { _, error in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                if let error {
-                    self.showGenericError(error)
-                } else {
-                    NSApplication.shared.terminate(nil)
-                }
-            }
+        let appPath = bundleURL.path.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let command = "sleep 0.45; open '\(appPath)'"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+
+        do {
+            shouldOfferRestartAfterPermissionGrant = false
+            updateToggleTitle()
+            try process.run()
+            NSApplication.shared.terminate(nil)
+        } catch {
+            shouldOfferRestartAfterPermissionGrant = true
+            updateToggleTitle()
+            showGenericError(error)
         }
     }
 
@@ -768,6 +774,7 @@ private final class ControlPanelWindowController: NSWindowController {
     private let accessibilityStatusLabel = NSTextField(labelWithString: "")
     private let inputMonitoringStatusLabel = NSTextField(labelWithString: "")
     private let footerEmailLabel = NSTextField(labelWithString: "")
+    private let restartHintLabel = NSTextField(labelWithString: "")
     private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private lazy var printStatsButton = makeButton(title: "", action: #selector(printStatsClicked))
     private lazy var restartButton = makeButton(title: "", action: #selector(restartClicked))
@@ -814,6 +821,7 @@ private final class ControlPanelWindowController: NSWindowController {
         hideMenuBarIconToggle.state = hideMenuBarIcon ? .on : .off
         hideDockIconToggle.state = hideDockIcon ? .on : .off
         restartButton.isHidden = !showRestartButton
+        restartHintLabel.isHidden = !showRestartButton
         suppressActions = false
     }
 
@@ -862,6 +870,9 @@ private final class ControlPanelWindowController: NSWindowController {
         inputMonitoringStatusLabel.font = .systemFont(ofSize: 12)
         accessibilityStatusLabel.textColor = .secondaryLabelColor
         inputMonitoringStatusLabel.textColor = .secondaryLabelColor
+        restartHintLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        restartHintLabel.textColor = .systemOrange
+        restartHintLabel.isHidden = true
 
         iconView.image = iconProvider()
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 26, weight: .semibold)
@@ -905,6 +916,11 @@ private final class ControlPanelWindowController: NSWindowController {
         actionRow.spacing = 10
         actionRow.distribution = .fillEqually
 
+        let restartSection = NSStackView(views: [restartHintLabel, actionRow])
+        restartSection.orientation = .vertical
+        restartSection.alignment = .leading
+        restartSection.spacing = 6
+
         footerEmailLabel.font = .systemFont(ofSize: 11)
         footerEmailLabel.textColor = .secondaryLabelColor
         footerEmailLabel.alignment = .right
@@ -915,7 +931,7 @@ private final class ControlPanelWindowController: NSWindowController {
             languageRow,
             togglesStack,
             permissionsStack,
-            actionRow,
+            restartSection,
             footerEmailLabel,
         ])
         container.orientation = .vertical
@@ -968,6 +984,7 @@ private final class ControlPanelWindowController: NSWindowController {
         hideDockIconToggle.title = L10n.text(.panelHideDesktopIcon, language)
         printStatsButton.title = L10n.text(.panelPrintStats, language)
         restartButton.title = L10n.text(.panelRestartApp, language)
+        restartHintLabel.stringValue = L10n.text(.panelRestartHint, language)
         quitButton.title = L10n.text(.panelQuit, language)
         footerEmailLabel.stringValue = "\(L10n.text(.panelDeveloperPrefix, language)): songzihan473@gmail.com"
 
