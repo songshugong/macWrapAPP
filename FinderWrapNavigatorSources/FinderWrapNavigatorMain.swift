@@ -207,13 +207,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         service.setRightArrowTurboEnabled(startupState.turboEnabled)
         hideMenuBarIcon = startupState.hideMenuBarIcon
         hideDockIcon = startupState.hideDockIcon
-        let launchedFromLoginAgent = isLikelyLaunchAtLoginStartup()
         applyInterfaceVisibility()
         if hideDockIcon {
-            scheduleDockRecentCleanupBurst(
-                extended: true,
-                restartDockAtDelays: launchedFromLoginAgent ? [12.0] : []
-            )
+            scheduleDockRecentCleanupBurst(extended: true)
         }
         configureControlPanel()
 
@@ -221,6 +217,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             startServiceIfPossible()
         }
 
+        let launchedFromLoginAgent = isLikelyLaunchAtLoginStartup()
         let permissionStatus = currentPermissionStatus()
         let shouldShowStartupPanel = !launchedFromLoginAgent || !permissionStatus.accessibilityAuthorized
         if shouldShowStartupPanel {
@@ -385,11 +382,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.setHideDockIcon(hideDockIcon)
         applyInterfaceVisibility()
         if hidden {
-            // Manual toggle path: mostly lightweight cleanup, plus one delayed forced refresh for reliability.
-            scheduleDockRecentCleanupBurst(
-                extended: true,
-                restartDockAtDelays: [2.0, 5.0, 12.0]
-            )
+            scheduleDockRecentCleanupBurst(extended: true)
         } else {
             cancelDockCleanupWorkItems()
         }
@@ -403,20 +396,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         updateToggleTitle()
     }
 
-    private func syncDockRecentAppEntryIfNeeded(restartDockIfChanged: Bool = false) {
+    private func syncDockRecentAppEntryIfNeeded() {
         guard let appURL = Bundle.main.bundleURL as URL? else { return }
         let bundleID = Bundle.main.bundleIdentifier ?? "com.finderwrap.navigator"
         dockRecentAppsManager.removeRecentEntry(
             bundleIdentifier: bundleID,
-            appURL: appURL,
-            restartDockIfChanged: restartDockIfChanged
+            appURL: appURL
         )
     }
 
-    private func scheduleDockRecentCleanupBurst(
-        extended: Bool = false,
-        restartDockAtDelays: [TimeInterval] = []
-    ) {
+    private func scheduleDockRecentCleanupBurst(extended: Bool = false) {
         syncDockRecentAppEntryIfNeeded()
         cancelDockCleanupWorkItems()
 
@@ -426,16 +415,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         for delay in delays {
-            let shouldRestartDockInThisPass = restartDockAtDelays.contains {
-                abs($0 - delay) < 0.02
-            }
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self, self.hideDockIcon else { return }
                 // Re-assert accessory mode in case system startup flow temporarily restored Dock visibility.
                 self.applyInterfaceVisibility()
-                self.syncDockRecentAppEntryIfNeeded(
-                    restartDockIfChanged: shouldRestartDockInThisPass
-                )
+                self.syncDockRecentAppEntryIfNeeded()
             }
             dockCleanupWorkItems.append(workItem)
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
@@ -1408,11 +1392,7 @@ private final class DockRecentAppsManager {
     private let dockDomain = "com.apple.dock"
     private let recentAppsKey = "recent-apps"
 
-    func removeRecentEntry(
-        bundleIdentifier: String,
-        appURL: URL,
-        restartDockIfChanged: Bool = false
-    ) {
+    func removeRecentEntry(bundleIdentifier: String, appURL: URL) {
         guard let dockDefaults = UserDefaults(suiteName: dockDomain) else { return }
         let entries = dockDefaults.array(forKey: recentAppsKey) ?? []
         let targetPath = appURL.resolvingSymlinksInPath().path
@@ -1437,9 +1417,7 @@ private final class DockRecentAppsManager {
         guard removed else { return }
         dockDefaults.set(filteredEntries, forKey: recentAppsKey)
         dockDefaults.synchronize()
-        if restartDockIfChanged {
-            restartDock()
-        }
+        restartDock()
     }
 
     private func shouldRemove(
