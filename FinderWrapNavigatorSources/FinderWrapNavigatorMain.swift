@@ -209,7 +209,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         hideDockIcon = startupState.hideDockIcon
         applyInterfaceVisibility()
         if hideDockIcon {
-            scheduleDockRecentCleanupBurst()
+            scheduleDockRecentCleanupBurst(extended: true)
         }
         configureControlPanel()
 
@@ -382,7 +382,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.setHideDockIcon(hideDockIcon)
         applyInterfaceVisibility()
         if hidden {
-            scheduleDockRecentCleanupBurst()
+            scheduleDockRecentCleanupBurst(extended: true)
         } else {
             cancelDockCleanupWorkItems()
         }
@@ -405,14 +405,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func scheduleDockRecentCleanupBurst() {
+    private func scheduleDockRecentCleanupBurst(extended: Bool = false) {
         syncDockRecentAppEntryIfNeeded()
         cancelDockCleanupWorkItems()
 
-        let delays: [TimeInterval] = [0.25, 0.9, 2.0]
+        var delays: [TimeInterval] = [0.25, 0.9, 2.0]
+        if extended {
+            delays.append(contentsOf: [5.0, 12.0, 24.0, 40.0, 58.0])
+        }
+
         for delay in delays {
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self, self.hideDockIcon else { return }
+                // Re-assert accessory mode in case system startup flow temporarily restored Dock visibility.
+                self.applyInterfaceVisibility()
                 self.syncDockRecentAppEntryIfNeeded()
             }
             dockCleanupWorkItems.append(workItem)
