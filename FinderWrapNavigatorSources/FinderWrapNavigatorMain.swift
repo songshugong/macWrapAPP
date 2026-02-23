@@ -618,6 +618,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onRestartRequested = { [weak self] in
             self?.restartApp()
         }
+        panel.onPanelClosed = { [weak self] in
+            self?.reconcileDockVisibilityAfterPanelClose()
+        }
         panel.onQuit = {
             NSApplication.shared.terminate(nil)
         }
@@ -651,6 +654,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private func isLikelyLaunchAtLoginStartup() -> Bool {
         guard launchAtLoginManager.isEnabled else { return false }
         return !CommandLine.arguments.contains(where: { $0.hasPrefix("-psn_") })
+    }
+
+    private func reconcileDockVisibilityAfterPanelClose() {
+        guard hideDockIcon else { return }
+
+        applyInterfaceVisibility()
+        scheduleDockRecentCleanupBurst(extended: true)
+
+        // A short delayed re-assert avoids the "first close keeps Dock icon" race.
+        let reassertWorkItem = DispatchWorkItem { [weak self] in
+            guard let self, self.hideDockIcon else { return }
+            self.applyInterfaceVisibility()
+        }
+        dockCleanupWorkItems.append(reassertWorkItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: reassertWorkItem)
     }
 
     private func t(_ key: LKey) -> String {
@@ -813,7 +831,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
 }
 
-private final class ControlPanelWindowController: NSWindowController {
+private final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     var onMainFeatureChanged: ((Bool) -> Void)?
     var onTurboChanged: ((Bool) -> Void)?
     var onLaunchAtLoginChanged: ((Bool) -> Void)?
@@ -822,6 +840,7 @@ private final class ControlPanelWindowController: NSWindowController {
     var onLanguageChanged: ((AppLanguage) -> Void)?
     var onPrintStats: (() -> Void)?
     var onRestartRequested: (() -> Void)?
+    var onPanelClosed: (() -> Void)?
     var onQuit: (() -> Void)?
 
     private var language: AppLanguage
@@ -862,6 +881,7 @@ private final class ControlPanelWindowController: NSWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
         buildUI()
         updateLanguage(language)
         resizeWindowToFitContent()
@@ -1160,6 +1180,10 @@ private final class ControlPanelWindowController: NSWindowController {
     @objc
     private func quitClicked() {
         onQuit?()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onPanelClosed?()
     }
 }
 
