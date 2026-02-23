@@ -45,5 +45,5 @@ xattr -dr com.apple.quarantine /path/to/FinderWrapNavigator.app
 - 支持中英文切换。
 
 ## 待办事项
-- [ ] 优化“隐藏 Dock 图标”开关：开启时自动同步清理 Dock 的 `recent-apps` 条目并刷新 Dock，避免残留图标。
-- [ ] 在主界面显示权限状态：明确标识“辅助功能（必需）/输入监控（可选）”是否到位。
+- [x] 优化“隐藏 Dock 图标”开关：开启时自动同步清理 Dock 的 `recent-apps` 条目并刷新 Dock，避免残留图标。
+- [x] 在主界面显示权限状态：明确标识“辅助功能（必需）/输入监控（可选）”是否到位。

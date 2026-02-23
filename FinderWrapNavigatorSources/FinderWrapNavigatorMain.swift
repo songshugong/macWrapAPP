@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Darwin
 
 private enum AppLanguage: String {
@@ -40,6 +41,12 @@ private enum LKey {
     case panelQuit
     case panelDeveloperPrefix
     case panelLanguage
+    case panelPermissionSection
+    case panelAccessibilityRequired
+    case panelInputMonitoringOptional
+    case panelPermissionGranted
+    case panelPermissionMissing
+    case panelPermissionUnknown
 }
 
 private enum L10n {
@@ -78,6 +85,12 @@ private enum L10n {
         case (.zhHans, .panelQuit): return "退出"
         case (.zhHans, .panelDeveloperPrefix): return "开发者"
         case (.zhHans, .panelLanguage): return "语言"
+        case (.zhHans, .panelPermissionSection): return "权限状态"
+        case (.zhHans, .panelAccessibilityRequired): return "辅助功能（必需）"
+        case (.zhHans, .panelInputMonitoringOptional): return "输入监控（可选）"
+        case (.zhHans, .panelPermissionGranted): return "已授权"
+        case (.zhHans, .panelPermissionMissing): return "未授权"
+        case (.zhHans, .panelPermissionUnknown): return "未知"
 
         case (.en, .menuOpenPanel): return "Open Control Panel"
         case (.en, .menuEnable): return "Enable"
@@ -112,6 +125,12 @@ private enum L10n {
         case (.en, .panelQuit): return "Quit"
         case (.en, .panelDeveloperPrefix): return "Developer"
         case (.en, .panelLanguage): return "Language"
+        case (.en, .panelPermissionSection): return "Permission Status"
+        case (.en, .panelAccessibilityRequired): return "Accessibility (Required)"
+        case (.en, .panelInputMonitoringOptional): return "Input Monitoring (Optional)"
+        case (.en, .panelPermissionGranted): return "Granted"
+        case (.en, .panelPermissionMissing): return "Missing"
+        case (.en, .panelPermissionUnknown): return "Unknown"
         }
     }
 }
@@ -129,8 +148,14 @@ enum FinderWrapNavigatorMain {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private struct PermissionStatus {
+        let accessibilityAuthorized: Bool
+        let inputMonitoringAuthorized: Bool?
+    }
+
     private let service = FinderRightArrowWrapService()
     private let launchAtLoginManager = LaunchAtLoginManager()
+    private let dockRecentAppsManager = DockRecentAppsManager()
     private let singleInstanceGuard = SingleInstanceGuard()
     private let launchAtLoginQueue = DispatchQueue(label: "com.finderwrap.navigator.launchAtLogin")
     private let preferences = AppPreferences()
@@ -159,6 +184,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         hideMenuBarIcon = startupState.hideMenuBarIcon
         hideDockIcon = startupState.hideDockIcon
         applyInterfaceVisibility()
+        if hideDockIcon {
+            syncDockRecentAppEntryIfNeeded()
+        }
         configureControlPanel()
 
         if startupState.mainEnabled {
@@ -301,9 +329,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setHideDockIconEnabled(_ hidden: Bool) {
+        guard hideDockIcon != hidden else { return }
         hideDockIcon = hidden
         preferences.setHideDockIcon(hideDockIcon)
         applyInterfaceVisibility()
+        if hidden {
+            syncDockRecentAppEntryIfNeeded()
+        }
         updateToggleTitle()
     }
 
@@ -312,6 +344,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         currentLanguage = language
         preferences.setLanguage(language)
         updateToggleTitle()
+    }
+
+    private func syncDockRecentAppEntryIfNeeded() {
+        guard let appURL = Bundle.main.bundleURL as URL? else { return }
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.finderwrap.navigator"
+        dockRecentAppsManager.removeRecentEntry(
+            bundleIdentifier: bundleID,
+            appURL: appURL
+        )
     }
 
     private func applyInterfaceVisibility() {
@@ -484,8 +525,29 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             hideMenuBarIcon: hideMenuBarIcon,
             hideDockIcon: hideDockIcon
         )
+        let permissions = currentPermissionStatus()
+        controlPanelController?.updatePermissionStatus(
+            accessibilityAuthorized: permissions.accessibilityAuthorized,
+            inputMonitoringAuthorized: permissions.inputMonitoringAuthorized
+        )
         controlPanelController?.updateLanguage(currentLanguage)
         controlPanelController?.updateIcon(statusIcon(isEnabled: service.isRunning))
+    }
+
+    private func currentPermissionStatus() -> PermissionStatus {
+        let accessibilityAuthorized = AXIsProcessTrusted()
+
+        let inputMonitoringAuthorized: Bool?
+        if #available(macOS 10.15, *) {
+            inputMonitoringAuthorized = CGPreflightListenEventAccess()
+        } else {
+            inputMonitoringAuthorized = nil
+        }
+
+        return PermissionStatus(
+            accessibilityAuthorized: accessibilityAuthorized,
+            inputMonitoringAuthorized: inputMonitoringAuthorized
+        )
     }
 
     private func statusIcon(isEnabled: Bool) -> NSImage? {
@@ -541,11 +603,16 @@ private final class ControlPanelWindowController: NSWindowController {
     private let titleLabel = NSTextField(labelWithString: "FinderWrap")
     private let subtitleLabel = NSTextField(labelWithString: "")
     private let languageLabel = NSTextField(labelWithString: "")
+    private let permissionSectionLabel = NSTextField(labelWithString: "")
+    private let accessibilityStatusLabel = NSTextField(labelWithString: "")
+    private let inputMonitoringStatusLabel = NSTextField(labelWithString: "")
     private let footerEmailLabel = NSTextField(labelWithString: "")
     private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private lazy var printStatsButton = makeButton(title: "", action: #selector(printStatsClicked))
     private lazy var quitButton = makeButton(title: "", action: #selector(quitClicked))
     private let iconView = NSImageView(frame: .zero)
+    private var accessibilityAuthorized = false
+    private var inputMonitoringAuthorized: Bool?
 
     init(language: AppLanguage, iconProvider: @escaping () -> NSImage?) {
         self.language = language
@@ -586,6 +653,15 @@ private final class ControlPanelWindowController: NSWindowController {
         suppressActions = false
     }
 
+    func updatePermissionStatus(
+        accessibilityAuthorized: Bool,
+        inputMonitoringAuthorized: Bool?
+    ) {
+        self.accessibilityAuthorized = accessibilityAuthorized
+        self.inputMonitoringAuthorized = inputMonitoringAuthorized
+        applyPermissionStatusText()
+    }
+
     func updateIcon(_ image: NSImage?) {
         iconView.image = image
     }
@@ -600,6 +676,11 @@ private final class ControlPanelWindowController: NSWindowController {
 
         titleLabel.font = .boldSystemFont(ofSize: 22)
         subtitleLabel.textColor = .secondaryLabelColor
+        permissionSectionLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        accessibilityStatusLabel.font = .systemFont(ofSize: 12)
+        inputMonitoringStatusLabel.font = .systemFont(ofSize: 12)
+        accessibilityStatusLabel.textColor = .secondaryLabelColor
+        inputMonitoringStatusLabel.textColor = .secondaryLabelColor
 
         iconView.image = iconProvider()
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 26, weight: .semibold)
@@ -629,6 +710,15 @@ private final class ControlPanelWindowController: NSWindowController {
         togglesStack.alignment = .leading
         togglesStack.spacing = 8
 
+        let permissionsStack = NSStackView(views: [
+            permissionSectionLabel,
+            accessibilityStatusLabel,
+            inputMonitoringStatusLabel,
+        ])
+        permissionsStack.orientation = .vertical
+        permissionsStack.alignment = .leading
+        permissionsStack.spacing = 4
+
         let actionRow = NSStackView(views: [printStatsButton, quitButton])
         actionRow.orientation = .horizontal
         actionRow.spacing = 10
@@ -638,7 +728,15 @@ private final class ControlPanelWindowController: NSWindowController {
         footerEmailLabel.textColor = .secondaryLabelColor
         footerEmailLabel.alignment = .right
 
-        let container = NSStackView(views: [headerStack, subtitleLabel, languageRow, togglesStack, actionRow, footerEmailLabel])
+        let container = NSStackView(views: [
+            headerStack,
+            subtitleLabel,
+            languageRow,
+            togglesStack,
+            permissionsStack,
+            actionRow,
+            footerEmailLabel,
+        ])
         container.orientation = .vertical
         container.alignment = .leading
         container.spacing = 14
@@ -681,6 +779,7 @@ private final class ControlPanelWindowController: NSWindowController {
         window?.title = L10n.text(.panelTitle, language)
         subtitleLabel.stringValue = L10n.text(.panelSubtitle, language)
         languageLabel.stringValue = L10n.text(.panelLanguage, language)
+        permissionSectionLabel.stringValue = L10n.text(.panelPermissionSection, language)
         mainFeatureToggle.title = L10n.text(.panelMainFeature, language)
         turboToggle.title = L10n.text(.panelTurbo, language)
         launchAtLoginToggle.title = L10n.text(.panelLaunchAtLogin, language)
@@ -698,6 +797,28 @@ private final class ControlPanelWindowController: NSWindowController {
         ])
         languagePopup.selectItem(at: language == .zhHans ? 0 : 1)
         suppressActions = false
+
+        applyPermissionStatusText()
+    }
+
+    private func applyPermissionStatusText() {
+        let accessibilityText = accessibilityAuthorized
+            ? L10n.text(.panelPermissionGranted, language)
+            : L10n.text(.panelPermissionMissing, language)
+
+        let inputMonitoringText: String
+        if let inputMonitoringAuthorized {
+            inputMonitoringText = inputMonitoringAuthorized
+                ? L10n.text(.panelPermissionGranted, language)
+                : L10n.text(.panelPermissionMissing, language)
+        } else {
+            inputMonitoringText = L10n.text(.panelPermissionUnknown, language)
+        }
+
+        accessibilityStatusLabel.stringValue =
+            "\(L10n.text(.panelAccessibilityRequired, language)): \(accessibilityText)"
+        inputMonitoringStatusLabel.stringValue =
+            "\(L10n.text(.panelInputMonitoringOptional, language)): \(inputMonitoringText)"
     }
 
     @objc
@@ -969,6 +1090,75 @@ private enum LaunchAtLoginError: LocalizedError {
                 return "launchctl 执行失败: \(command)"
             }
             return "launchctl 执行失败: \(command)\n\(message)"
+        }
+    }
+}
+
+private final class DockRecentAppsManager {
+    private let dockDomain = "com.apple.dock"
+    private let recentAppsKey = "recent-apps"
+
+    func removeRecentEntry(bundleIdentifier: String, appURL: URL) {
+        guard let dockDefaults = UserDefaults(suiteName: dockDomain) else { return }
+        let entries = dockDefaults.array(forKey: recentAppsKey) ?? []
+        let targetPath = appURL.resolvingSymlinksInPath().path
+        var removed = false
+
+        let filteredEntries = entries.filter { entry in
+            guard let entryDict = entry as? [String: Any] else {
+                return true
+            }
+
+            if shouldRemove(
+                entry: entryDict,
+                bundleIdentifier: bundleIdentifier,
+                targetPath: targetPath
+            ) {
+                removed = true
+                return false
+            }
+            return true
+        }
+
+        guard removed else { return }
+        dockDefaults.set(filteredEntries, forKey: recentAppsKey)
+        dockDefaults.synchronize()
+        restartDock()
+    }
+
+    private func shouldRemove(
+        entry: [String: Any],
+        bundleIdentifier: String,
+        targetPath: String
+    ) -> Bool {
+        guard let tileData = entry["tile-data"] as? [String: Any] else {
+            return false
+        }
+
+        if let existingBundleIdentifier = tileData["bundle-identifier"] as? String,
+           existingBundleIdentifier == bundleIdentifier {
+            return true
+        }
+
+        guard let fileData = tileData["file-data"] as? [String: Any],
+              let urlString = fileData["_CFURLString"] as? String,
+              let storedURL = URL(string: urlString) else {
+            return false
+        }
+
+        let storedPath = storedURL.resolvingSymlinksInPath().path
+        return storedPath == targetPath
+    }
+
+    private func restartDock() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        process.arguments = ["Dock"]
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            // Ignore failures here to avoid blocking UI state changes.
         }
     }
 }
