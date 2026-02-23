@@ -212,7 +212,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if hideDockIcon {
             scheduleDockRecentCleanupBurst(
                 extended: true,
-                allowDockRestart: launchedFromLoginAgent
+                restartDockAtDelays: launchedFromLoginAgent ? [12.0] : []
             )
         }
         configureControlPanel()
@@ -385,7 +385,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.setHideDockIcon(hideDockIcon)
         applyInterfaceVisibility()
         if hidden {
-            scheduleDockRecentCleanupBurst(extended: true, allowDockRestart: false)
+            // Manual toggle path: mostly lightweight cleanup, plus one delayed forced refresh for reliability.
+            scheduleDockRecentCleanupBurst(
+                extended: true,
+                restartDockAtDelays: [2.8]
+            )
         } else {
             cancelDockCleanupWorkItems()
         }
@@ -411,7 +415,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func scheduleDockRecentCleanupBurst(
         extended: Bool = false,
-        allowDockRestart: Bool = false
+        restartDockAtDelays: [TimeInterval] = []
     ) {
         syncDockRecentAppEntryIfNeeded()
         cancelDockCleanupWorkItems()
@@ -422,9 +426,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         for delay in delays {
-            // Only do one delayed Dock restart in launch-at-login path.
-            // Manual toggle uses pure lightweight cleanup to avoid visible flashing.
-            let shouldRestartDockInThisPass = allowDockRestart && abs(delay - 12.0) < 0.01
+            let shouldRestartDockInThisPass = restartDockAtDelays.contains {
+                abs($0 - delay) < 0.02
+            }
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self, self.hideDockIcon else { return }
                 // Re-assert accessory mode in case system startup flow temporarily restored Dock visibility.
