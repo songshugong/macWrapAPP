@@ -38,6 +38,7 @@ private enum LKey {
     case panelHideMenuIcon
     case panelHideDesktopIcon
     case panelPrintStats
+    case panelRestartApp
     case panelQuit
     case panelDeveloperPrefix
     case panelLanguage
@@ -82,6 +83,7 @@ private enum L10n {
         case (.zhHans, .panelHideMenuIcon): return "隐藏菜单图标"
         case (.zhHans, .panelHideDesktopIcon): return "隐藏桌面图标"
         case (.zhHans, .panelPrintStats): return "打印统计"
+        case (.zhHans, .panelRestartApp): return "重新启动应用"
         case (.zhHans, .panelQuit): return "退出"
         case (.zhHans, .panelDeveloperPrefix): return "开发者"
         case (.zhHans, .panelLanguage): return "语言"
@@ -122,6 +124,7 @@ private enum L10n {
         case (.en, .panelHideMenuIcon): return "Hide Menu Bar Icon"
         case (.en, .panelHideDesktopIcon): return "Hide Dock Icon"
         case (.en, .panelPrintStats): return "Print Stats"
+        case (.en, .panelRestartApp): return "Restart App"
         case (.en, .panelQuit): return "Quit"
         case (.en, .panelDeveloperPrefix): return "Developer"
         case (.en, .panelLanguage): return "Language"
@@ -162,7 +165,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginQueue = DispatchQueue(label: "com.finderwrap.navigator.launchAtLogin")
     private let preferences = AppPreferences()
     private var externalOpenObserver: NSObjectProtocol?
+    private var appDidBecomeActiveObserver: NSObjectProtocol?
     private var dockCleanupWorkItems: [DispatchWorkItem] = []
+    private var accessibilityAuthorizedAtLaunch = true
+    private var shouldOfferRestartAfterPermissionGrant = false
     private var currentLanguage: AppLanguage = .zhHans
     private var controlPanelController: ControlPanelWindowController?
     private var hideMenuBarIcon = false
@@ -186,6 +192,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         registerExternalOpenObserver()
+        registerAppActivationObserver()
+        accessibilityAuthorizedAtLaunch = AXIsProcessTrusted()
 
         let startupState = preferences.loadOrInitializeDefaults()
         currentLanguage = startupState.language
@@ -220,6 +228,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if let externalOpenObserver {
             DistributedNotificationCenter.default().removeObserver(externalOpenObserver)
             self.externalOpenObserver = nil
+        }
+        if let appDidBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
+            self.appDidBecomeActiveObserver = nil
         }
         singleInstanceGuard.release()
     }
@@ -429,6 +441,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func registerAppActivationObserver() {
+        appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: NSApp,
+            queue: OperationQueue.main
+        ) { [weak self] _ in
+            self?.updateToggleTitle()
+        }
+    }
+
     private func postShowPanelRequestToRunningInstance() {
         DistributedNotificationCenter.default().postNotificationName(
             Self.showPanelRequestNotification,
@@ -573,6 +595,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onPrintStats = { [weak self] in
             self?.printStatsReport()
         }
+        panel.onRestartRequested = { [weak self] in
+            self?.restartApp()
+        }
         panel.onQuit = {
             NSApplication.shared.terminate(nil)
         }
@@ -582,6 +607,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showControlPanel(forceActivate: Bool) {
         guard let controlPanelController else { return }
+        controlPanelController.positionWindowToRightSide()
         controlPanelController.showWindow(nil)
         if forceActivate {
             NSApp.activate(ignoringOtherApps: true)
@@ -603,6 +629,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateToggleTitle() {
+        let permissions = currentPermissionStatus()
+
+        if !accessibilityAuthorizedAtLaunch
+            && permissions.accessibilityAuthorized
+            && !service.isRunning {
+            shouldOfferRestartAfterPermissionGrant = true
+        }
+        if service.isRunning {
+            shouldOfferRestartAfterPermissionGrant = false
+        }
+
         openPanelItem?.title = t(.menuOpenPanel)
         toggleItem?.title = service.isRunning ? t(.menuDisable) : t(.menuEnable)
         turboToggleItem?.title = t(.menuTurbo)
@@ -625,9 +662,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             turboEnabled: service.isRightArrowTurboEnabled(),
             launchAtLoginEnabled: launchAtLoginManager.isEnabled,
             hideMenuBarIcon: hideMenuBarIcon,
-            hideDockIcon: hideDockIcon
+            hideDockIcon: hideDockIcon,
+            showRestartButton: shouldOfferRestartAfterPermissionGrant
         )
-        let permissions = currentPermissionStatus()
         controlPanelController?.updatePermissionStatus(
             accessibilityAuthorized: permissions.accessibilityAuthorized,
             inputMonitoringAuthorized: permissions.inputMonitoringAuthorized
@@ -681,6 +718,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    private func restartApp() {
+        let openConfig = NSWorkspace.OpenConfiguration()
+        openConfig.activates = true
+        openConfig.addsToRecentItems = false
+
+        guard let bundleURL = Bundle.main.bundleURL as URL? else {
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: openConfig) { _, error in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                if let error {
+                    self.showGenericError(error)
+                } else {
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+        }
+    }
+
 }
 
 private final class ControlPanelWindowController: NSWindowController {
@@ -691,6 +749,7 @@ private final class ControlPanelWindowController: NSWindowController {
     var onHideDockIconChanged: ((Bool) -> Void)?
     var onLanguageChanged: ((AppLanguage) -> Void)?
     var onPrintStats: (() -> Void)?
+    var onRestartRequested: (() -> Void)?
     var onQuit: (() -> Void)?
 
     private var language: AppLanguage
@@ -711,6 +770,7 @@ private final class ControlPanelWindowController: NSWindowController {
     private let footerEmailLabel = NSTextField(labelWithString: "")
     private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private lazy var printStatsButton = makeButton(title: "", action: #selector(printStatsClicked))
+    private lazy var restartButton = makeButton(title: "", action: #selector(restartClicked))
     private lazy var quitButton = makeButton(title: "", action: #selector(quitClicked))
     private let iconView = NSImageView(frame: .zero)
     private var accessibilityAuthorized = false
@@ -744,7 +804,8 @@ private final class ControlPanelWindowController: NSWindowController {
         turboEnabled: Bool,
         launchAtLoginEnabled: Bool,
         hideMenuBarIcon: Bool,
-        hideDockIcon: Bool
+        hideDockIcon: Bool,
+        showRestartButton: Bool
     ) {
         suppressActions = true
         mainFeatureToggle.state = mainFeatureEnabled ? .on : .off
@@ -752,7 +813,25 @@ private final class ControlPanelWindowController: NSWindowController {
         launchAtLoginToggle.state = launchAtLoginEnabled ? .on : .off
         hideMenuBarIconToggle.state = hideMenuBarIcon ? .on : .off
         hideDockIconToggle.state = hideDockIcon ? .on : .off
+        restartButton.isHidden = !showRestartButton
         suppressActions = false
+    }
+
+    func positionWindowToRightSide() {
+        guard let window else { return }
+
+        let currentScreen = window.screen ?? NSScreen.main
+        guard let visibleFrame = currentScreen?.visibleFrame else { return }
+
+        var frame = window.frame
+        frame.origin.x = visibleFrame.maxX - frame.width - 26
+        frame.origin.y = visibleFrame.midY - frame.height / 2
+        frame.origin.x = max(visibleFrame.minX + 12, frame.origin.x)
+        frame.origin.y = max(
+            visibleFrame.minY + 12,
+            min(frame.origin.y, visibleFrame.maxY - frame.height - 12)
+        )
+        window.setFrame(frame, display: false)
     }
 
     func updatePermissionStatus(
@@ -821,7 +900,7 @@ private final class ControlPanelWindowController: NSWindowController {
         permissionsStack.alignment = .leading
         permissionsStack.spacing = 4
 
-        let actionRow = NSStackView(views: [printStatsButton, quitButton])
+        let actionRow = NSStackView(views: [printStatsButton, restartButton, quitButton])
         actionRow.orientation = .horizontal
         actionRow.spacing = 10
         actionRow.distribution = .fillEqually
@@ -888,6 +967,7 @@ private final class ControlPanelWindowController: NSWindowController {
         hideMenuBarIconToggle.title = L10n.text(.panelHideMenuIcon, language)
         hideDockIconToggle.title = L10n.text(.panelHideDesktopIcon, language)
         printStatsButton.title = L10n.text(.panelPrintStats, language)
+        restartButton.title = L10n.text(.panelRestartApp, language)
         quitButton.title = L10n.text(.panelQuit, language)
         footerEmailLabel.stringValue = "\(L10n.text(.panelDeveloperPrefix, language)): songzihan473@gmail.com"
 
@@ -963,6 +1043,11 @@ private final class ControlPanelWindowController: NSWindowController {
     @objc
     private func printStatsClicked() {
         onPrintStats?()
+    }
+
+    @objc
+    private func restartClicked() {
+        onRestartRequested?()
     }
 
     @objc
