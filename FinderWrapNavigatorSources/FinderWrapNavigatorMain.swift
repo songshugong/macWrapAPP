@@ -388,7 +388,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             // Manual toggle path: mostly lightweight cleanup, plus one delayed forced refresh for reliability.
             scheduleDockRecentCleanupBurst(
                 extended: true,
-                restartDockAtDelays: [2.8]
+                restartDockAtDelays: [2.0, 5.0, 12.0]
             )
         } else {
             cancelDockCleanupWorkItems()
