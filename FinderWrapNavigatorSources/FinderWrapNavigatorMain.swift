@@ -162,6 +162,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginQueue = DispatchQueue(label: "com.finderwrap.navigator.launchAtLogin")
     private let preferences = AppPreferences()
     private var externalOpenObserver: NSObjectProtocol?
+    private var dockCleanupWorkItems: [DispatchWorkItem] = []
     private var currentLanguage: AppLanguage = .zhHans
     private var controlPanelController: ControlPanelWindowController?
     private var hideMenuBarIcon = false
@@ -193,7 +194,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         hideDockIcon = startupState.hideDockIcon
         applyInterfaceVisibility()
         if hideDockIcon {
-            syncDockRecentAppEntryIfNeeded()
+            scheduleDockRecentCleanupBurst()
         }
         configureControlPanel()
 
@@ -207,13 +208,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if hideDockIcon {
-            syncDockRecentAppEntryIfNeeded()
+            scheduleDockRecentCleanupBurst()
         }
         showControlPanel(forceActivate: true)
         return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        cancelDockCleanupWorkItems()
         if let externalOpenObserver {
             DistributedNotificationCenter.default().removeObserver(externalOpenObserver)
             self.externalOpenObserver = nil
@@ -354,7 +356,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.setHideDockIcon(hideDockIcon)
         applyInterfaceVisibility()
         if hidden {
-            syncDockRecentAppEntryIfNeeded()
+            scheduleDockRecentCleanupBurst()
+        } else {
+            cancelDockCleanupWorkItems()
         }
         updateToggleTitle()
     }
@@ -375,6 +379,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private func scheduleDockRecentCleanupBurst() {
+        syncDockRecentAppEntryIfNeeded()
+        cancelDockCleanupWorkItems()
+
+        let delays: [TimeInterval] = [0.25, 0.9, 2.0]
+        for delay in delays {
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self, self.hideDockIcon else { return }
+                self.syncDockRecentAppEntryIfNeeded()
+            }
+            dockCleanupWorkItems.append(workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
+    }
+
+    private func cancelDockCleanupWorkItems() {
+        dockCleanupWorkItems.forEach { $0.cancel() }
+        dockCleanupWorkItems.removeAll()
+    }
+
     private func registerExternalOpenObserver() {
         externalOpenObserver = DistributedNotificationCenter.default().addObserver(
             forName: Self.showPanelRequestNotification,
@@ -383,7 +407,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             if self.hideDockIcon {
-                self.syncDockRecentAppEntryIfNeeded()
+                self.scheduleDockRecentCleanupBurst()
             }
             self.showControlPanel(forceActivate: true)
         }
