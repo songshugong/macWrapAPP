@@ -626,11 +626,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if !permissionStatus.accessibilityAuthorized {
             controlPanelController.positionWindowToRightSide()
         }
-        controlPanelController.setFloatingMode(!permissionStatus.accessibilityAuthorized)
-        controlPanelController.showPanel()
         if forceActivate {
             NSApp.activate(ignoringOtherApps: true)
         }
+        controlPanelController.setFloatingMode(true)
+        controlPanelController.showPanel()
     }
 
     private func hideControlPanel() {
@@ -712,7 +712,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             shouldOfferRestartAfterPermissionGrant = false
         }
 
-        controlPanelController?.setFloatingMode(!permissions.accessibilityAuthorized)
+        controlPanelController?.setFloatingMode(true)
         if wasAccessibilityAuthorized == false && permissions.accessibilityAuthorized {
             controlPanelController?.positionWindowToCenter()
             showControlPanel(forceActivate: true)
@@ -898,6 +898,7 @@ private final class ControlPanelWindowController: NSWindowController, NSWindowDe
         window.title = L10n.text(.panelTitle, language)
         window.center()
         window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         super.init(window: window)
         window.delegate = self
         buildUI()
@@ -976,6 +977,7 @@ private final class ControlPanelWindowController: NSWindowController, NSWindowDe
 
     func showPanel() {
         guard let window else { return }
+        window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
     }
 
