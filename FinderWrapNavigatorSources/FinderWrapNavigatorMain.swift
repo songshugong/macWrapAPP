@@ -227,11 +227,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if hideDockIcon {
-            scheduleDockRecentCleanupBurst()
-            runDockSuppressionRefreshCycle()
-        }
-        showControlPanel(forceActivate: true)
+        toggleControlPanel(forceActivate: true)
         return true
     }
 
@@ -266,7 +262,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func openControlPanel() {
-        showControlPanel(forceActivate: true)
+        toggleControlPanel(forceActivate: true)
     }
 
     @objc
@@ -453,11 +449,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            if self.hideDockIcon {
-                self.scheduleDockRecentCleanupBurst()
-                self.runDockSuppressionRefreshCycle()
-            }
-            self.showControlPanel(forceActivate: true)
+            self.toggleControlPanel(forceActivate: true)
         }
     }
 
@@ -618,7 +610,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onRestartRequested = { [weak self] in
             self?.restartApp()
         }
-        panel.onPanelClosed = { [weak self] in
+        panel.onPanelHidden = { [weak self] in
             self?.reconcileDockVisibilityAfterPanelClose()
         }
         panel.onQuit = {
@@ -635,10 +627,36 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             controlPanelController.positionWindowToRightSide()
         }
         controlPanelController.setFloatingMode(!permissionStatus.accessibilityAuthorized)
-        controlPanelController.showWindow(nil)
+        controlPanelController.showPanel()
         if forceActivate {
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func hideControlPanel() {
+        guard let controlPanelController else { return }
+        guard controlPanelController.isPanelVisible() else { return }
+        controlPanelController.hidePanel()
+    }
+
+    private func toggleControlPanel(forceActivate: Bool) {
+        let permissionStatus = currentPermissionStatus()
+        if !permissionStatus.accessibilityAuthorized {
+            showControlPanel(forceActivate: forceActivate)
+            return
+        }
+
+        guard let controlPanelController else { return }
+        if controlPanelController.isPanelVisible() {
+            hideControlPanel()
+            return
+        }
+
+        if hideDockIcon {
+            scheduleDockRecentCleanupBurst()
+            runDockSuppressionRefreshCycle()
+        }
+        showControlPanel(forceActivate: forceActivate)
     }
 
     private func showControlPanelWithStartupFailsafe() {
@@ -840,7 +858,7 @@ private final class ControlPanelWindowController: NSWindowController, NSWindowDe
     var onLanguageChanged: ((AppLanguage) -> Void)?
     var onPrintStats: (() -> Void)?
     var onRestartRequested: (() -> Void)?
-    var onPanelClosed: (() -> Void)?
+    var onPanelHidden: (() -> Void)?
     var onQuit: (() -> Void)?
 
     private var language: AppLanguage
@@ -950,6 +968,21 @@ private final class ControlPanelWindowController: NSWindowController, NSWindowDe
 
     func setFloatingMode(_ enabled: Bool) {
         window?.level = enabled ? .floating : .normal
+    }
+
+    func isPanelVisible() -> Bool {
+        window?.isVisible ?? false
+    }
+
+    func showPanel() {
+        guard let window else { return }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func hidePanel() {
+        guard let window else { return }
+        window.orderOut(nil)
+        onPanelHidden?()
     }
 
     func updatePermissionStatus(
@@ -1182,8 +1215,9 @@ private final class ControlPanelWindowController: NSWindowController, NSWindowDe
         onQuit?()
     }
 
-    func windowWillClose(_ notification: Notification) {
-        onPanelClosed?()
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        hidePanel()
+        return false
     }
 }
 
