@@ -169,6 +169,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = AppPreferences()
     private var externalOpenObserver: NSObjectProtocol?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
+    private var appDidResignActiveObserver: NSObjectProtocol?
     private var permissionPollTimer: Timer?
     private var dockCleanupWorkItems: [DispatchWorkItem] = []
     private var accessibilityAuthorizedAtLaunch = true
@@ -198,6 +199,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         registerExternalOpenObserver()
         registerAppActivationObserver()
+        registerAppDeactivationObserver()
         accessibilityAuthorizedAtLaunch = AXIsProcessTrusted()
         lastAccessibilityAuthorized = accessibilityAuthorizedAtLaunch
         ensurePermissionPollingIfNeeded()
@@ -241,6 +243,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if let appDidBecomeActiveObserver {
             NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
             self.appDidBecomeActiveObserver = nil
+        }
+        if let appDidResignActiveObserver {
+            NotificationCenter.default.removeObserver(appDidResignActiveObserver)
+            self.appDidResignActiveObserver = nil
         }
         singleInstanceGuard.release()
     }
@@ -463,6 +469,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func registerAppDeactivationObserver() {
+        appDidResignActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: NSApp,
+            queue: OperationQueue.main
+        ) { [weak self] _ in
+            self?.updateControlPanelWindowLevel()
+        }
+    }
+
     private func postShowPanelRequestToRunningInstance() {
         DistributedNotificationCenter.default().postNotificationName(
             Self.showPanelRequestNotification,
@@ -629,7 +645,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if forceActivate {
             NSApp.activate(ignoringOtherApps: true)
         }
-        controlPanelController.setFloatingMode(true)
+        updateControlPanelWindowLevel(using: permissionStatus)
         controlPanelController.showPanel()
     }
 
@@ -648,6 +664,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let controlPanelController else { return }
         if controlPanelController.isPanelVisible() {
+            if forceActivate && !NSApp.isActive {
+                showControlPanel(forceActivate: true)
+                return
+            }
             hideControlPanel()
             return
         }
@@ -693,6 +713,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         L10n.text(key, currentLanguage)
     }
 
+    private func updateControlPanelWindowLevel(using permissionStatus: PermissionStatus? = nil) {
+        let permissions = permissionStatus ?? currentPermissionStatus()
+        let shouldFloat = !permissions.accessibilityAuthorized || NSApp.isActive
+        controlPanelController?.setFloatingMode(shouldFloat)
+    }
+
     private func updateToggleTitle() {
         let permissions = currentPermissionStatus()
         let wasAccessibilityAuthorized = lastAccessibilityAuthorized
@@ -712,7 +738,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             shouldOfferRestartAfterPermissionGrant = false
         }
 
-        controlPanelController?.setFloatingMode(true)
+        updateControlPanelWindowLevel(using: permissions)
         if wasAccessibilityAuthorized == false && permissions.accessibilityAuthorized {
             controlPanelController?.positionWindowToCenter()
             showControlPanel(forceActivate: true)
