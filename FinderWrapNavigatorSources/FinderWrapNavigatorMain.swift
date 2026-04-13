@@ -898,7 +898,7 @@ private final class ControlPanelWindowController: NSWindowController, NSWindowDe
         window.title = L10n.text(.panelTitle, language)
         window.center()
         window.isReleasedWhenClosed = false
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.collectionBehavior = []
         super.init(window: window)
         window.delegate = self
         buildUI()
