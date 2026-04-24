@@ -21,6 +21,7 @@ final class FinderRightArrowWrapService {
     private let syntheticEventTag: Int64 = 0x46575250
     private let finderBundleID = "com.apple.finder"
     private let quickLookBundleIDs: Set<String> = [
+        "com.apple.quicklook.QuickLookUIService",
         "com.apple.quicklook.ui.helper",
         "com.apple.QuickLookUIService"
     ]
@@ -92,6 +93,9 @@ final class FinderRightArrowWrapService {
         var leftArrowTurboChecks = 0
         var rightTurboSyntheticSteps = 0
         var leftTurboSyntheticSteps = 0
+        var quickLookArrowEvents = 0
+        var quickLookFallbackAttempts = 0
+        var quickLookFallbackSucceeded = 0
     }
 
     private struct ResourceSnapshot {
@@ -286,6 +290,9 @@ final class FinderRightArrowWrapService {
           leftArrowTurboChecks: \(diagnostics.leftArrowTurboChecks)
           rightTurboSyntheticSteps: \(diagnostics.rightTurboSyntheticSteps)
           leftTurboSyntheticSteps: \(diagnostics.leftTurboSyntheticSteps)
+          quickLookArrowEvents: \(diagnostics.quickLookArrowEvents)
+          quickLookFallbackAttempts: \(diagnostics.quickLookFallbackAttempts)
+          quickLookFallbackSucceeded: \(diagnostics.quickLookFallbackSucceeded)
         Resources:
           samples: \(resourceCounters.sampleCount)
           avgCPUPercent: \(String(format: "%.2f", avgCPUPercent))
@@ -298,6 +305,9 @@ final class FinderRightArrowWrapService {
           currentFinderDirectory: \(cachedFinderDirectoryPath ?? "unknown")
         Toggles:
           arrowTurboModeEnabled: \(rightArrowTurboModeEnabled)
+        Frontmost:
+          currentBundleIdentifier: \(currentFrontmostBundleIdentifier())
+          quickLookRecognized: \(isQuickLookFrontmost())
         """
     }
 
@@ -378,6 +388,9 @@ final class FinderRightArrowWrapService {
         guard shouldObserveArrowKeysForFrontmostApp() else {
             diagnostics.passthroughCount += 1
             return Unmanaged.passUnretained(event)
+        }
+        if isQuickLookFrontmost() {
+            diagnostics.quickLookArrowEvents += 1
         }
 
         let now = CFAbsoluteTimeGetCurrent()
@@ -638,20 +651,43 @@ final class FinderRightArrowWrapService {
         guard let app = finderRunningApplication() else { return nil }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        let candidateRoots = selectionCandidateRoots(appElement: appElement)
-        guard !candidateRoots.isEmpty else { return nil }
+        if let focusedWindow = copyElementAttribute(of: appElement, key: kAXFocusedWindowAttribute as String),
+           isLikelyStandardFinderWindow(focusedWindow),
+           let focusedElement = copyElementAttribute(
+               of: appElement,
+               key: kAXFocusedUIElementAttribute as String
+           ),
+           let context = buildGridContext(
+               appElement: appElement,
+               appPID: app.processIdentifier,
+               root: focusedElement,
+               deadline: deadline
+           ) {
+            return context
+        }
 
-        for root in candidateRoots {
+        guard isQuickLookFrontmost() else {
+            return nil
+        }
+        diagnostics.quickLookFallbackAttempts += 1
+
+        // Only Quick Look gets the heavier Finder-window scan. Keeping normal
+        // Finder navigation on the focused-element path avoids repeat-key lag.
+        guard let windows = copyElementArrayAttribute(of: appElement, key: kAXWindowsAttribute as String) else {
+            return nil
+        }
+
+        for window in windows where isLikelyStandardFinderWindow(window) {
             guard CFAbsoluteTimeGetCurrent() <= deadline else { return nil }
-            guard let context = buildGridContext(
+            if let context = buildGridContext(
                 appElement: appElement,
                 appPID: app.processIdentifier,
-                root: root,
+                root: window,
                 deadline: deadline
-            ) else {
-                continue
+            ) {
+                diagnostics.quickLookFallbackSucceeded += 1
+                return context
             }
-            return context
         }
 
         return nil
@@ -729,36 +765,6 @@ final class FinderRightArrowWrapService {
             selectedRowIndex: rebuiltLocation.row,
             selectedColumnIndex: rebuiltLocation.column
         )
-    }
-
-    private func selectionCandidateRoots(appElement: AXUIElement) -> [AXUIElement] {
-        var roots: [AXUIElement] = []
-        var seen = Set<CFHashCode>()
-
-        func appendUnique(_ element: AXUIElement?) {
-            guard let element else { return }
-            let hash = CFHash(element)
-            guard !seen.contains(hash) else { return }
-            seen.insert(hash)
-            roots.append(element)
-        }
-
-        let focusedWindow = copyElementAttribute(of: appElement, key: kAXFocusedWindowAttribute as String)
-        if let focusedWindow, isLikelyStandardFinderWindow(focusedWindow) {
-            appendUnique(copyElementAttribute(of: appElement, key: kAXFocusedUIElementAttribute as String))
-            appendUnique(focusedWindow)
-        }
-
-        // Quick Look keeps Finder frontmost but moves focus to its preview panel.
-        // Search the ordinary Finder windows as a fallback so icon-view wrapping
-        // still works while the preview window is open.
-        if let windows = copyElementArrayAttribute(of: appElement, key: kAXWindowsAttribute as String) {
-            for window in windows where isLikelyStandardFinderWindow(window) {
-                appendUnique(window)
-            }
-        }
-
-        return roots
     }
 
     private func isLikelyStandardFinderWindow(_ window: AXUIElement) -> Bool {
@@ -1463,11 +1469,24 @@ final class FinderRightArrowWrapService {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == finderBundleID
     }
 
+    private func currentFrontmostBundleIdentifier() -> String {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+    }
+
     private func shouldObserveArrowKeysForFrontmostApp() -> Bool {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+        let bundleID = currentFrontmostBundleIdentifier()
+        guard bundleID != "unknown" else {
             return false
         }
         return bundleID == finderBundleID || isQuickLookBundleID(bundleID)
+    }
+
+    private func isQuickLookFrontmost() -> Bool {
+        let bundleID = currentFrontmostBundleIdentifier()
+        guard bundleID != "unknown" else {
+            return false
+        }
+        return isQuickLookBundleID(bundleID)
     }
 
     private func isQuickLookBundleID(_ bundleID: String) -> Bool {
