@@ -637,27 +637,36 @@ final class FinderRightArrowWrapService {
         }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        guard let focusedWindow = copyElementAttribute(of: appElement, key: kAXFocusedWindowAttribute as String),
-              isLikelyStandardFinderWindow(focusedWindow) else {
-            return nil
+        let candidateRoots = selectionCandidateRoots(appElement: appElement)
+        guard !candidateRoots.isEmpty else { return nil }
+
+        for root in candidateRoots {
+            guard CFAbsoluteTimeGetCurrent() <= deadline else { return nil }
+            guard let context = buildGridContext(
+                appElement: appElement,
+                appPID: app.processIdentifier,
+                root: root,
+                deadline: deadline
+            ) else {
+                continue
+            }
+            return context
         }
 
-        guard let focusedElement = copyElementAttribute(
-            of: appElement,
-            key: kAXFocusedUIElementAttribute as String
-        ) else {
-            return nil
-        }
+        return nil
+    }
 
-        guard let (container, selectedElement) = findSelectionContainer(startingAt: focusedElement) else {
+    private func buildGridContext(
+        appElement: AXUIElement,
+        appPID: pid_t,
+        root: AXUIElement,
+        deadline: CFAbsoluteTime
+    ) -> GridContext? {
+        guard let (container, selectedElement) = findSelectionContainer(startingAt: root),
+              isLikelyIconViewContainer(container) else {
             return nil
         }
-        guard isLikelyIconViewContainer(container) else {
-            return nil
-        }
-
         let containerHash = CFHash(container)
-        let appPID = app.processIdentifier
 
         let rows: [[GridItem]]
         let indexMap: [CFHashCode: GridIndex]
@@ -721,12 +730,49 @@ final class FinderRightArrowWrapService {
         )
     }
 
+    private func selectionCandidateRoots(appElement: AXUIElement) -> [AXUIElement] {
+        var roots: [AXUIElement] = []
+        var seen = Set<CFHashCode>()
+
+        func appendUnique(_ element: AXUIElement?) {
+            guard let element else { return }
+            let hash = CFHash(element)
+            guard !seen.contains(hash) else { return }
+            seen.insert(hash)
+            roots.append(element)
+        }
+
+        let focusedWindow = copyElementAttribute(of: appElement, key: kAXFocusedWindowAttribute as String)
+        if let focusedWindow, isLikelyStandardFinderWindow(focusedWindow) {
+            appendUnique(copyElementAttribute(of: appElement, key: kAXFocusedUIElementAttribute as String))
+            appendUnique(focusedWindow)
+        }
+
+        // Quick Look keeps Finder frontmost but moves focus to its preview panel.
+        // Search the ordinary Finder windows as a fallback so icon-view wrapping
+        // still works while the preview window is open.
+        if let windows = copyElementArrayAttribute(of: appElement, key: kAXWindowsAttribute as String) {
+            for window in windows where isLikelyStandardFinderWindow(window) {
+                appendUnique(window)
+            }
+        }
+
+        return roots
+    }
+
     private func isLikelyStandardFinderWindow(_ window: AXUIElement) -> Bool {
         let role = copyStringAttribute(of: window, key: kAXRoleAttribute as String) ?? ""
         guard role == "AXWindow" else { return false }
 
         let subrole = copyStringAttribute(of: window, key: kAXSubroleAttribute as String) ?? ""
         if subrole == "AXDesktop" || subrole == "AXDesktopWindow" {
+            return false
+        }
+
+        let description = copyStringAttribute(of: window, key: kAXDescriptionAttribute as String) ?? ""
+        let title = copyStringAttribute(of: window, key: kAXTitleAttribute as String) ?? ""
+        let lowerIdentity = "\(subrole) \(description) \(title)".lowercased()
+        if lowerIdentity.contains("quick look") || lowerIdentity.contains("quicklook") {
             return false
         }
 
