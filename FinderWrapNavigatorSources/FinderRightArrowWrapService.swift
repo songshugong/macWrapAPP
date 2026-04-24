@@ -20,6 +20,10 @@ final class FinderRightArrowWrapService {
 
     private let syntheticEventTag: Int64 = 0x46575250
     private let finderBundleID = "com.apple.finder"
+    private let quickLookBundleIDs: Set<String> = [
+        "com.apple.quicklook.ui.helper",
+        "com.apple.QuickLookUIService"
+    ]
     private let rightArrowKeyCode: CGKeyCode = 124
     private let leftArrowKeyCode: CGKeyCode = 123
     private let downArrowKeyCode: CGKeyCode = 125
@@ -218,7 +222,7 @@ final class FinderRightArrowWrapService {
     private func refreshTapForFrontmostApp() -> Bool {
         guard serviceEnabled else { return true }
 
-        if isFinderFrontmost() {
+        if shouldObserveArrowKeysForFrontmostApp() {
             if eventTap == nil {
                 return createEventTap()
             }
@@ -371,7 +375,7 @@ final class FinderRightArrowWrapService {
             return Unmanaged.passUnretained(event)
         }
 
-        guard isFinderFrontmost() else {
+        guard shouldObserveArrowKeysForFrontmostApp() else {
             diagnostics.passthroughCount += 1
             return Unmanaged.passUnretained(event)
         }
@@ -631,10 +635,7 @@ final class FinderRightArrowWrapService {
     private func buildGridContext(deadline: CFAbsoluteTime) -> GridContext? {
         guard CFAbsoluteTimeGetCurrent() <= deadline else { return nil }
 
-        guard let app = NSWorkspace.shared.frontmostApplication,
-              app.bundleIdentifier == finderBundleID else {
-            return nil
-        }
+        guard let app = finderRunningApplication() else { return nil }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let candidateRoots = selectionCandidateRoots(appElement: appElement)
@@ -1050,8 +1051,8 @@ final class FinderRightArrowWrapService {
     }
 
     private func isFinderEditingText() -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication,
-              app.bundleIdentifier == finderBundleID else {
+        guard isFinderFrontmost(),
+              let app = finderRunningApplication() else {
             return false
         }
 
@@ -1462,11 +1463,30 @@ final class FinderRightArrowWrapService {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == finderBundleID
     }
 
-    private func selectedItemToken() -> String? {
-        guard let app = NSWorkspace.shared.frontmostApplication,
-              app.bundleIdentifier == finderBundleID else {
-            return nil
+    private func shouldObserveArrowKeysForFrontmostApp() -> Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
         }
+        return bundleID == finderBundleID || isQuickLookBundleID(bundleID)
+    }
+
+    private func isQuickLookBundleID(_ bundleID: String) -> Bool {
+        if quickLookBundleIDs.contains(bundleID) {
+            return true
+        }
+        return bundleID.lowercased().contains("quicklook")
+    }
+
+    private func finderRunningApplication() -> NSRunningApplication? {
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier == finderBundleID {
+            return frontmost
+        }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: finderBundleID).first
+    }
+
+    private func selectedItemToken() -> String? {
+        guard let app = finderRunningApplication() else { return nil }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         guard let focusedElement = copyElementAttribute(
